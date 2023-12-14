@@ -1,0 +1,159 @@
+---
+- name: Deploy Symfony API
+  hosts: webservers
+  become: yes
+  vars:
+    project_root: /var/www/ecommerce
+    repository_url: https://mlavalle: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@github.com/EpitechMscProPromo2025/T-WEB-600-LIL-6-1-ecommerce-martin.flament.git
+    server_name: localhost:2222
+
+  tasks:
+    - name: Update package cache and upgrade packages
+      apt:
+        update_cache: yes
+        upgrade: safe
+
+    - name: Get the Debian distribution codename
+      ansible.builtin.shell: "lsb_release -sc"
+      register: debian_codename
+
+    - name: Install dependencies for the Sury repository
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+
+    - name: Add the Sury GPG key
+      ansible.builtin.apt_key:
+        url: https://packages.sury.org/php/apt.gpg
+        state: present
+
+    - name: Add the Sury repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://packages.sury.org/php/ {{ debian_codename.stdout }} main"
+        state: present
+        update_cache: yes
+
+    - name: Install PHP and additional modules
+      apt:
+        name:
+          - php8.2
+          - php8.2-fpm
+          - php8.2-mbstring
+          - php8.2-mysql
+          - php8.2-curl
+          - php8.2-intl
+          - php8.2-gd
+          - php8.2-opcache
+          - php8.2-xml
+          - php8.2-zip
+        state: present
+
+    - name: Install python
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-pymysql
+        state: latest
+        update_cache: yes
+
+    - name: Install Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Install MariaDB
+      apt:
+        name: mariadb-server
+        state: present
+
+    - name: Install git
+      apt:
+        name: git
+        state: present
+    
+    - name: Install curl
+      apt:
+        name: curl
+        state: present
+    
+    - name: Install sudo
+      apt:
+        name: sudo
+        state: present
+
+    - name: Enable and start MariaDB service
+      systemd:
+        name: mariadb
+        state: started
+        enabled: yes
+    
+    - name: Create MariaDB user
+      mysql_user:
+        check_implicit_admin: true
+        login_password: 951236847
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        name: malavalle
+        password: 951236847
+        priv: "*.*:ALL"
+        state: present
+
+    - name: Create MariaDB database
+      mysql_db:
+        login_user: malavalle
+        login_password: 951236847
+        name: e_commerce54_db
+        state: present
+
+    - name: Clone Symfony API repository
+      git:
+        repo: "{{ repository_url }}"
+        dest: "{{ project_root }}"
+        force: yes
+
+    - name: Configure Nginx
+      template:
+        src: ./nginx.conf.j2
+        dest: /etc/nginx/sites-available/ecommerce
+      notify: restart nginx
+    
+    - name: Disable default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Enable Nginx site
+      file:
+        src: /etc/nginx/sites-available/ecommerce
+        dest: /etc/nginx/sites-enabled/ecommerce
+        state: link
+      notify: restart nginx
+
+    - name: Install Composer
+      ansible.builtin.shell: "curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer"
+      args:
+        creates: /usr/local/bin/composer
+
+    - name: Install Symfony API dependencies
+      ansible.builtin.command:
+        cmd: composer install --no-interaction --optimize-autoloader
+        chdir: "{{ project_root }}"
+      environment:
+        COMPOSER_ALLOW_SUPERUSER: 1
+
+    - name: Run migrations
+      shell: php bin/console doctrine:schema:update --force
+      args:
+        chdir: "{{ project_root }}"
+
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
